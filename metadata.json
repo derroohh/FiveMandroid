@@ -1,0 +1,6 @@
+{
+  "name": "FiveM Mobile",
+  "description": "Premium FiveM PC multiplayer server client recreation on Android with fully working direct connect, interactive server lobby simulation, terminal debugger console, cache optimizer, and local database profile management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
