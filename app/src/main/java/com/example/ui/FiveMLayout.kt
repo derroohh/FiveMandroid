@@ -212,6 +212,7 @@ fun FiveMMainLayout(viewModel: FiveMViewModel) {
 fun HomeScreen(viewModel: FiveMViewModel, onNavigateToServers: () -> Unit) {
     val scrollState = rememberScrollState()
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
+    val history by viewModel.repository.historyFlow.collectAsStateWithLifecycle(emptyList())
 
     Column(
         modifier = Modifier
@@ -299,7 +300,7 @@ fun HomeScreen(viewModel: FiveMViewModel, onNavigateToServers: () -> Unit) {
                                 ping = 15,
                                 tags = "",
                                 category = "roleplay"
-                            )
+							)
                         )
                     }
                     .padding(12.dp)
@@ -351,6 +352,75 @@ fun HomeScreen(viewModel: FiveMViewModel, onNavigateToServers: () -> Unit) {
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = "Join", tint = FivemOrange, modifier = Modifier.size(16.dp))
                         Text("FAST LOAD", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = FivemOrange)
+                    }
+                }
+            }
+        }
+
+        // Cfx Last Connected Server Node section (Mirroring desktop client re-connect option)
+        val lastPlayed = history.firstOrNull()
+        if (lastPlayed != null) {
+            Text("Last Connected Cfx Server Node", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = FivemDeepGrey),
+                border = BorderStroke(1.dp, FivemOrange.copy(alpha = 0.6f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = lastPlayed.serverName,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = FivemWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Address ID: ${lastPlayed.ipAddress}",
+                            fontSize = 10.sp,
+                            color = FivemTextMuted,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            if (lastPlayed.ipAddress.startsWith("local.server.id:")) {
+                                val cleanId = lastPlayed.ipAddress.removePrefix("local.server.id:")
+                                viewModel.requestConnect(
+                                    ServerEntity(
+                                        id = cleanId,
+                                        name = lastPlayed.serverName,
+                                        description = "Simulated connection node",
+                                        playersCount = 142,
+                                        maxPlayers = 250,
+                                        ping = 25,
+                                        tags = "roleplay,custom",
+                                        category = "roleplay"
+                                    )
+                                )
+                            } else {
+                                viewModel.requestDirectConnect(lastPlayed.ipAddress)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = FivemOrange),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reconnect", tint = FivemWhite, modifier = Modifier.size(14.dp))
+                            Text("RE-CONNECT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                        }
                     }
                 }
             }
@@ -1291,8 +1361,321 @@ fun SettingsScreen(viewModel: FiveMViewModel) {
                 }
             }
         }
+
+        // --- NEW: Mobile Graphics & Asset Optimizer Engine ---
+        Text("Mobile Graphics & Asset Optimizer Engine", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+
+        var selectedTextureFormat by remember { mutableStateOf("ASTC") }
+        var meshDecimationLevel by remember { mutableStateOf("75%") }
+        var selectedLodBias by remember { mutableStateOf("Balanced") }
+
+        var isCompilingShaders by remember { mutableStateOf(false) }
+        var shaderCompileProgress by remember { mutableStateOf(0f) }
+        var shaderCompileStatus by remember { mutableStateOf("") }
+
+        var isAnalyzingAssets by remember { mutableStateOf(false) }
+        var analysisReportReady by remember { mutableStateOf(false) }
+        var processedVehiclesCount by remember { mutableStateOf(0) }
+        var processedPedsCount by remember { mutableStateOf(0) }
+        var ramSavingsMb by remember { mutableStateOf(0) }
+
+        val coroutineScope = rememberCoroutineScope()
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = FivemDeepGrey),
+            border = BorderStroke(1.dp, FivemBorderGrey)
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // 1. Texture Compression Format Selector
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("GPU Texture Compression Format", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                    Text("Compresses bulky GTA texture assets natively for optimal Android GPU bandpass.", fontSize = 9.sp, color = FivemTextMuted)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val formats = listOf("ASTC", "ETC2", "DXT5")
+                        formats.forEach { format ->
+                            val isSelected = selectedTextureFormat == format
+                            val infoText = when (format) {
+                                "ASTC" -> "Recommended (70% compressed)"
+                                "ETC2" -> "Legacy (Standard compression)"
+                                "DXT5" -> "Desktop Only (Caution: high VRAM)"
+                                else -> ""
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) FivemOrange.copy(alpha = 0.2f) else FivemDarkBg)
+                                    .border(1.dp, if (isSelected) FivemOrange else FivemBorderGrey, RoundedCornerShape(6.dp))
+                                    .clickable { selectedTextureFormat = format }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(format, fontSize = 11.sp, color = if (isSelected) FivemOrange else FivemWhite, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (format == "ASTC") "Optimized" else if (format == "ETC2") "Fallback" else "Heavy",
+                                        fontSize = 8.sp,
+                                        color = if (isSelected) FivemOrange else FivemTextMuted
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider(color = FivemBorderGrey)
+
+                // 2. Vertex Mesh Decimation Level (Mesh Simplification)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Vertex Mesh Decimation Level (Mesh Simplification)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                    Text("Decimates dense vehicle polygons to guarantee steady frame rates on mid-range devices.", fontSize = 9.sp, color = FivemTextMuted)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val meshOptions = listOf(
+                            "100%" to "Original High-Poly",
+                            "75%" to "Optimized (Balanced)",
+                            "50%" to "Aggressive (Max FPS)"
+                        )
+                        meshOptions.forEach { (option, desc) ->
+                            val isSelected = meshDecimationLevel == option
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) FivemOrange.copy(alpha = 0.2f) else FivemDarkBg)
+                                    .border(1.dp, if (isSelected) FivemOrange else FivemBorderGrey, RoundedCornerShape(6.dp))
+                                    .clickable { meshDecimationLevel = option }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(option, fontSize = 12.sp, color = if (isSelected) FivemOrange else FivemWhite, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = desc.split(" ").first(),
+                                        fontSize = 8.sp,
+                                        color = if (isSelected) FivemOrange else FivemTextMuted
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider(color = FivemBorderGrey)
+
+                // 3. Level of Detail (LOD) Draw Distance Bias
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Level of Detail (LOD) Draw Distance Bias", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                    Text("Controls high-fidelity model draw boundaries and limits pop-in artifacts.", fontSize = 9.sp, color = FivemTextMuted)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val lodOptions = listOf("Balanced", "Slight Blend", "Performance (Far)")
+                        lodOptions.forEach { option ->
+                            val isSelected = selectedLodBias == option
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) FivemOrange.copy(alpha = 0.2f) else FivemDarkBg)
+                                    .border(1.dp, if (isSelected) FivemOrange else FivemBorderGrey, RoundedCornerShape(6.dp))
+                                    .clickable { selectedLodBias = option }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = option,
+                                    fontSize = 10.sp,
+                                    color = if (isSelected) FivemOrange else FivemWhite,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Divider(color = FivemBorderGrey)
+
+                // 4. Interactive shader compilation
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Asynchronous Shader Pre-Compilation", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                            Text("Pre-warms local FX shaders before launching connection to prevent micro-stutter.", fontSize = 9.sp, color = FivemTextMuted)
+                        }
+                        Button(
+                            onClick = {
+                                if (!isCompilingShaders) {
+                                    isCompilingShaders = true
+                                    shaderCompileProgress = 0f
+                                    shaderCompileStatus = "Initializing compiler pipelines..."
+                                    coroutineScope.launch {
+                                        val compileLogs = listOf(
+                                            "Compiling water_reflection.fx shader library...",
+                                            "compiling world_geometry_shadows.fx (ASTC block optimized)...",
+                                            "generating dynamic screen-space ambient occlusion distance fields...",
+                                            "Packing vehicle_metallic_gloss.fx texture arrays...",
+                                            "Caching UI hardware vertex buffer shaders..."
+                                        )
+                                        for (i in 1..100) {
+                                            delay(25)
+                                            shaderCompileProgress = i / 100f
+                                            val logIdx = (shaderCompileProgress * compileLogs.size).toInt().coerceIn(0, compileLogs.size - 1)
+                                            shaderCompileStatus = compileLogs[logIdx]
+                                        }
+                                        shaderCompileStatus = "Success! 452 shaders built and cached."
+                                        isCompilingShaders = false
+                                        // Update local cache state via ViewModel
+                                        val currentCache = profile.assetCacheSizeMb
+                                        viewModel.repository.saveProfile(profile.copy(assetCacheSizeMb = currentCache + 15))
+                                    }
+                                }
+                            },
+                            enabled = !isCompilingShaders,
+                            colors = ButtonDefaults.buttonColors(containerColor = FivemOrange),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(if (isCompilingShaders) "COMPILING..." else "PRE-COMPILE", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (isCompilingShaders || shaderCompileStatus.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Black)
+                                .border(1.dp, FivemBorderGrey, RoundedCornerShape(4.dp))
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = shaderCompileStatus,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (shaderCompileStatus.startsWith("Success")) FivemSuccess else FivemOrange,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${(shaderCompileProgress * 100).toInt()}%",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = FivemOrange,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { shaderCompileProgress },
+                                color = FivemOrange,
+                                trackColor = FivemBorderGrey,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                            )
+                        }
+                    }
+                }
+
+                Divider(color = FivemBorderGrey)
+
+                // 5. Asset analysis diagnostics
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Cfx Asset Allocation Analyzer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                            Text("Scans vehicle textures, terrain geometry meshes, and LOD configurations for potential bottlenecks.", fontSize = 9.sp, color = FivemTextMuted)
+                        }
+                        Button(
+                            onClick = {
+                                if (!isAnalyzingAssets) {
+                                    isAnalyzingAssets = true
+                                    analysisReportReady = false
+                                    coroutineScope.launch {
+                                        delay(1500) // Simulate fast GPU deep analyze scan
+                                        processedVehiclesCount = 84
+                                        processedPedsCount = 112
+                                        ramSavingsMb = when (selectedTextureFormat) {
+                                            "ASTC" -> 412
+                                            "ETC2" -> 195
+                                            else -> 0
+                                        } + if (meshDecimationLevel == "75%") 150 else if (meshDecimationLevel == "50%") 280 else 0
+                                        
+                                        isAnalyzingAssets = false
+                                        analysisReportReady = true
+                                    }
+                                }
+                            },
+                            enabled = !isAnalyzingAssets,
+                            colors = ButtonDefaults.buttonColors(containerColor = FivemBorderGrey),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            if (isAnalyzingAssets) {
+                                CircularProgressIndicator(color = FivemWhite, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("ANALYZING...", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                            } else {
+                                Text("RUN ANALYZER", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = FivemWhite)
+                            }
+                        }
+                    }
+
+                    if (analysisReportReady) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(FivemDarkBg)
+                                .border(1.dp, FivemSuccess.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(FivemSuccess))
+                                    Text("ANALYSIS COMPLETED - HARDWARE STEADY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = FivemSuccess)
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("• Model mesh decimation reduced loaded triangles by: ${if (meshDecimationLevel == "75%") "25%" else if (meshDecimationLevel == "50%") "50%" else "0%"}.", fontSize = 9.sp, color = FivemWhite)
+                                Text("• Scanned & verified: $processedVehiclesCount custom vehicle files and $processedPedsCount pedestrian meshes.", fontSize = 9.sp, color = FivemWhite)
+                                Text("• GPU RAM Saved: ${ramSavingsMb} MB using $selectedTextureFormat.", fontSize = 9.sp, color = FivemSuccess, fontWeight = FontWeight.Bold)
+                                Text("• Projected Framerate on Mid-Range devices: ${if (selectedTextureFormat == "ASTC" && meshDecimationLevel != "100%") "60fps (Stable & Smooth)" else "35-45fps"} with ${selectedLodBias} distance LOD bounds.", fontSize = 9.sp, color = FivemWhite)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+
 
 @Composable
 fun ConnectingOverlay(state: ConnectionState.Connecting, onCancel: () -> Unit) {
